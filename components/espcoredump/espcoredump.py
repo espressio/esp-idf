@@ -77,12 +77,6 @@ class BinStruct(object):
         keys =  self.__class__.fields
         return struct.pack(self.__class__.format, *(self.__dict__[k] for k in keys))
 
-#     def __str__(self):
-#         keys =  self.__class__.fields
-#         return (self.__class__.__name__ + "({" +
-#             ", ".join("%s:%r" % (k, self.__dict__[k]) for k in keys) +
-#             "})")
-
 
 class Elf32FileHeader(BinStruct):
     """ELF32 file header
@@ -304,14 +298,12 @@ class ESPCoreDumpElfFile(esptool.ELFFile):
             raise ESPCoreDumpError("%s does not appear to be an Xtensa ELF file. e_machine=%04x" % (self.name, machine))
         self.e_type = type
         self.e_machine = machine
+        self.sections = []
+        self.program_segments = []
         if shnum > 0:
             self._read_sections(f, shoff, shstrndx)
-        else:
-            self.sections = []
-            if phnum > 0:
-                self._read_program_segments(f, phoff, phentsize, phnum)
-            else:
-                self.program_segments = []
+        if phnum > 0:
+            self._read_program_segments(f, phoff, phentsize, phnum)
 
     def _read_sections(self, f, section_header_offs, shstrndx):
         """Reads core dump sections from ELF file
@@ -373,17 +365,15 @@ class ESPCoreDumpElfFile(esptool.ELFFile):
         def read_program_header(offs):
             type,offset,vaddr,_paddr,filesz,_memsz,flags,_align = struct.unpack_from("<LLLLLLLL", seg_table[offs:])
             return (type,offset,vaddr,filesz,flags)
-        all_segments = [read_program_header(offs) for offs in seg_table_offs]
-        prog_segments = [s for s in all_segments if s[0] == self.PT_LOAD]
+        prog_segments = [read_program_header(offs) for offs in seg_table_offs]
 
         # build the real list of ImageSegment by reading actual data for each segment from the ELF file itself
         def read_data(offs,size):
             f.seek(offs)
             return f.read(size)
 
-        prog_segments = [ESPCoreDumpSegment(vaddr, read_data(offset, filesz), type, flags) for (type, offset, vaddr, filesz,flags) in prog_segments
+        self.program_segments = [ESPCoreDumpSegment(vaddr, read_data(offset, filesz), type, flags) for (type, offset, vaddr, filesz,flags) in prog_segments
                          if vaddr != 0]
-        self.program_segments = prog_segments
 
     def add_program_segment(self, addr, data, type, flags):
         """Adds new program segment
@@ -571,7 +561,7 @@ class ESPCoreDumpLoader(object):
             if self.fcore_name:
                 self.remove_tmp_file(self.fcore_name)
 
-    def create_corefile(self, core_fname=None, off=0):
+    def create_corefile(self, core_fname=None, off=0, rom_elf_path=None):
         """Creates core dump ELF file
         """
         core_off = off
@@ -622,6 +612,12 @@ class ESPCoreDumpLoader(object):
 
         # add notes
         core_elf.add_program_segment(0, notes, ESPCoreDumpElfFile.PT_NOTE, 0)
+        # add ROM text sections
+        if rom_elf_path and os.path.exists(rom_elf_path):
+            rom_elf = ESPCoreDumpElfFile(rom_elf_path)
+            for ps in rom_elf.program_segments:
+                if ps.flags & ESPCoreDumpSegment.PF_X:
+                    core_elf.add_program_segment(ps.addr, ps.data, ESPCoreDumpElfFile.PT_LOAD, ps.flags)
     
         core_elf.e_type = ESPCoreDumpElfFile.ET_CORE
         core_elf.e_machine = ESPCoreDumpElfFile.EM_XTENSA
@@ -748,7 +744,7 @@ class ESPCoreDumpFlashLoader(ESPCoreDumpLoader):
             raise ESPCoreDumpLoaderError("Invalid start magic number!")
         return tot_len
 
-    def create_corefile(self, core_fname=None):
+    def create_corefile(self, core_fname=None, rom_elf_path=None):
         """Checks flash coredump data integrity and creates ELF file
         """
         data = self.read_data(0, self.ESP32_COREDUMP_FLASH_MAGIC_SZ)
@@ -761,7 +757,7 @@ class ESPCoreDumpFlashLoader(ESPCoreDumpLoader):
         if mag2 != self.ESP32_COREDUMP_FLASH_MAGIC_END:
             raise ESPCoreDumpLoaderError("Invalid end marker %x" % mag2)
         
-        return super(ESPCoreDumpFlashLoader, self).create_corefile(core_fname, off=self.ESP32_COREDUMP_FLASH_MAGIC_SZ)
+        return super(ESPCoreDumpFlashLoader, self).create_corefile(core_fname, off=self.ESP32_COREDUMP_FLASH_MAGIC_SZ, rom_elf_path=rom_elf_path)
 
 
 class GDBMIOutRecordHandler(object):
@@ -864,7 +860,7 @@ def dbg_corefile(args):
     loader = None
     if not args.core:
         loader = ESPCoreDumpFlashLoader(args.off, port=args.port)
-        core_fname = loader.create_corefile(args.save_core)
+        core_fname = loader.create_corefile(args.save_core, rom_elf_path=args.rom_elf)
         if not core_fname:
             print "Failed to create corefile!"
             loader.cleanup()
@@ -873,7 +869,7 @@ def dbg_corefile(args):
         core_fname = args.core
         if args.core_format and args.core_format != 'elf':
             loader = ESPCoreDumpFileLoader(core_fname, args.core_format == 'b64')
-            core_fname = loader.create_corefile(args.save_core)
+            core_fname = loader.create_corefile(args.save_core, rom_elf_path=args.rom_elf)
             if not core_fname:
                 print "Failed to create corefile!"
                 loader.cleanup()
@@ -948,11 +944,10 @@ def info_corefile(args):
             print "GDB/MI command failed (%s / %s)!" % (handlers[GDBMIResultHandler.TAG].result_class, handlers[GDBMIResultHandler.TAG].result_str)
         return p
 
-
     loader = None
     if not args.core:
         loader = ESPCoreDumpFlashLoader(args.off, port=args.port)
-        core_fname = loader.create_corefile(args.save_core)
+        core_fname = loader.create_corefile(args.save_core, rom_elf_path=args.rom_elf)
         if not core_fname:
             print "Failed to create corefile!"
             loader.cleanup()
@@ -961,7 +956,7 @@ def info_corefile(args):
         core_fname = args.core
         if args.core_format and args.core_format != 'elf':
             loader = ESPCoreDumpFileLoader(core_fname, args.core_format == 'b64')
-            core_fname = loader.create_corefile(args.save_core)
+            core_fname = loader.create_corefile(args.save_core, rom_elf_path=args.rom_elf)
             if not core_fname:
                 print "Failed to create corefile!"
                 loader.cleanup()
@@ -1033,11 +1028,21 @@ def info_corefile(args):
     for ms in merged_segs:
         print "%s 0x%x 0x%x %s" % (ms[0], ms[1], ms[2], ms[3])
     for cs in core_segs:
-        print ".coredump.tasks 0x%x 0x%x %s" % (cs.addr, len(cs.data), cs.attr_str())
+        # core dump exec segments are from ROM, other are belong to tasks (TCB or stack)
+        if cs.flags & ESPCoreDumpSegment.PF_X:
+            seg_name = 'rom.text'
+        else:
+            seg_name = 'tasks.data'
+        print ".coredump.%s 0x%x 0x%x %s" % (seg_name, cs.addr, len(cs.data), cs.attr_str())
     if args.print_mem:
         print "\n====================== CORE DUMP MEMORY CONTENTS ========================"
         for cs in core_elf.program_segments:
-            print ".coredump.tasks 0x%x 0x%x %s" % (cs.addr, len(cs.data), cs.attr_str())
+            # core dump exec segments are from ROM, other are belong to tasks (TCB or stack)
+            if cs.flags & ESPCoreDumpSegment.PF_X:
+                seg_name = 'rom.text'
+            else:
+                seg_name = 'tasks.data'
+            print ".coredump.%s 0x%x 0x%x %s" % (seg_name, cs.addr, len(cs.data), cs.attr_str())
             p = gdbmi_getinfo(p, handlers, "x/%dx 0x%x" % (len(cs.data)/4, cs.addr))
 
     print "\n===================== ESP32 CORE DUMP END ====================="
@@ -1086,6 +1091,7 @@ def main():
     parser_debug_coredump.add_argument('--core-format', '-t', help='(elf, raw or b64). File specified with "-c" is an ELF ("elf"), raw (raw) or base64-encoded (b64) binary', type=str, default='elf')
     parser_debug_coredump.add_argument('--off', '-o', help='Ofsset of coredump partition in flash (type "make partition_table" to see).', type=int, default=0x110000)
     parser_debug_coredump.add_argument('--save-core', '-s', help='Save core to file. Othwerwise temporary core file will be deleted. Ignored with "-c"', type=str)
+    parser_debug_coredump.add_argument('--rom-elf', '-r', help='Path to ROM ELF file.', type=str, default='eagle.rom.out')
     parser_debug_coredump.add_argument('prog', help='Path to program\'s ELF binary', type=str)
 
     parser_info_coredump = subparsers.add_parser(
@@ -1096,6 +1102,7 @@ def main():
     parser_info_coredump.add_argument('--core-format', '-t', help='(elf, raw or b64). File specified with "-c" is an ELF ("elf"), raw (raw) or base64-encoded (b64) binary', type=str, default='elf')
     parser_info_coredump.add_argument('--off', '-o', help='Ofsset of coredump partition in flash (type "make partition_table" to see).', type=int, default=0x110000)
     parser_info_coredump.add_argument('--save-core', '-s', help='Save core to file. Othwerwise temporary core file will be deleted. Does not work with "-c"', type=str)
+    parser_info_coredump.add_argument('--rom-elf', '-r', help='Path to ROM ELF file.', type=str, default='eagle.rom.out')
     parser_info_coredump.add_argument('--print-mem', '-m', help='Print memory dump', action='store_true')
     parser_info_coredump.add_argument('prog', help='Path to program\'s ELF binary', type=str)
 
