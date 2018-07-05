@@ -665,6 +665,7 @@ free_socket(struct lwip_sock *sock, int is_tcp)
   sock->err        = 0;
 #if ESP_THREAD_SAFE
   if (sock->conn){
+    printf("free conn %p\n",sock->conn);
     netconn_free(sock->conn);
   }
 
