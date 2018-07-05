@@ -427,6 +427,7 @@ err_tcp(void *arg, err_t err)
   conn = (struct netconn *)arg;
   LWIP_ASSERT("conn != NULL", (conn != NULL));
 
+  printf("err_tcp = NULL\n");
   conn->pcb.tcp = NULL;
 
   /* no check since this is always fatal! */
@@ -673,6 +674,7 @@ netconn_alloc(enum netconn_type t, netconn_callback callback)
 
   conn->last_err = ERR_OK;
   conn->type = t;
+  printf("netconn_alloc pcb.tcp = NULL\n");
   conn->pcb.tcp = NULL;
 
   /* If all sizes are the same, every compiler should optimize this switch to nothing */
@@ -820,6 +822,7 @@ netconn_drain(struct netconn *conn)
       netconn_drain(newconn);
       if (newconn->pcb.tcp != NULL) {
         tcp_abort(newconn->pcb.tcp);
+        printf("netconn_drain = NULL\n");
         newconn->pcb.tcp = NULL;
       }
       netconn_free(newconn);
@@ -989,6 +992,7 @@ lwip_netconn_do_close_internal(struct netconn *conn  WRITE_DELAYED_PARAM SIG_CLO
     if (err == ERR_OK) {
       if (close) {
         /* Set back some callback pointers as conn is going away */
+        printf("lwip_netconn_do_close_internal tcp = null\n");
         conn->pcb.tcp = NULL;
         /* Trigger select() in socket layer. Make sure everybody notices activity
          on the connection, error first! */
@@ -1127,6 +1131,7 @@ lwip_netconn_do_delconn(void *m)
       default:
         break;
       }
+      printf("lwip_netconn_do_delconn = NULL\n");
       msg->conn->pcb.tcp = NULL;
     }
     /* tcp netconns don't come here! */
