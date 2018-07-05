@@ -86,6 +86,34 @@ typedef struct _core_dump_task_header_t
     uint32_t stack_end;   // stack end address
 } core_dump_task_header_t;
 
+// magic numbers to control core dump data consistency
+#define COREDUMP_FLASH_MAGIC_START    0xE32C04EDUL
+#define COREDUMP_FLASH_MAGIC_END      0xE32C04EDUL
+
+typedef struct _core_dump_write_flash_data_t
+{
+    uint32_t    off;
+} core_dump_write_flash_data_t;
+
+typedef struct _core_dump_partition_t
+{
+    // core dump partition start
+    uint32_t start;
+    // core dump partition size
+    uint32_t size;
+} core_dump_partition_t;
+
+typedef struct _core_dump_flash_config_t
+{
+    // core dump partition start
+    core_dump_partition_t partition;
+    // core dump partition size
+    uint32_t              crc;
+} core_dump_flash_config_t;
+
+// core dump flash data
+static core_dump_flash_config_t s_core_flash_config;
+
 static inline bool esp_task_stack_start_is_sane(uint32_t sp)
 {
     return !(sp < 0x3ffae010UL || sp > 0x3fffffffUL);
@@ -244,37 +272,14 @@ static void esp_core_dump_write(XtExcFrame *frame, core_dump_write_config_t *wri
             ESP_COREDUMP_LOGE("Crashed task has been skipped!");
         }
     }
+    extern char *psram_buff;
+    if(((core_dump_write_flash_data_t *)(write_cfg->priv))->off <= 32*1024) {
+        spi_flash_write(s_core_flash_config.partition.start + ((core_dump_write_flash_data_t *)(write_cfg->priv))->off, psram_buff, 32*1024);
+    }
 }
 
 #if CONFIG_ESP32_ENABLE_COREDUMP_TO_FLASH
 
-// magic numbers to control core dump data consistency
-#define COREDUMP_FLASH_MAGIC_START    0xE32C04EDUL
-#define COREDUMP_FLASH_MAGIC_END      0xE32C04EDUL
-
-typedef struct _core_dump_write_flash_data_t
-{
-    uint32_t    off;
-} core_dump_write_flash_data_t;
-
-typedef struct _core_dump_partition_t
-{
-    // core dump partition start
-    uint32_t start;
-    // core dump partition size
-    uint32_t size;
-} core_dump_partition_t;
-
-typedef struct _core_dump_flash_config_t
-{
-    // core dump partition start
-    core_dump_partition_t partition;
-    // core dump partition size
-    uint32_t              crc;
-} core_dump_flash_config_t;
-
-// core dump flash data
-static core_dump_flash_config_t s_core_flash_config;
 
 static uint32_t esp_core_dump_write_flash_padded(size_t off, uint8_t *data, uint32_t data_size)
 {
@@ -335,7 +340,8 @@ static esp_err_t esp_core_dump_flash_write_prepare(void *priv, uint32_t *data_le
     if (*data_len % SPI_FLASH_SEC_SIZE)
         sec_num++;
     assert(sec_num * SPI_FLASH_SEC_SIZE <= s_core_flash_config.partition.size);
-    err = spi_flash_erase_range(s_core_flash_config.partition.start + 0, sec_num * SPI_FLASH_SEC_SIZE);
+    // err = spi_flash_erase_range(s_core_flash_config.partition.start + 0, sec_num * SPI_FLASH_SEC_SIZE);
+    err = spi_flash_erase_range(s_core_flash_config.partition.start + 0, s_core_flash_config.partition.size);
     if (err != ESP_OK) {
         ESP_COREDUMP_LOGE("Failed to erase flash (%d)!", err);
         return err;
@@ -404,7 +410,6 @@ static esp_err_t esp_core_dump_flash_write_data(void *priv, void * data, uint32_
         return ESP_FAIL;
 
     wr_data->off += len;
-
     return err;
 }
 

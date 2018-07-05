@@ -136,7 +136,7 @@ static int uart_rx_char_via_driver(int fd)
     }
     return c;
 }
-
+char *psram_buff = NULL;
 static ssize_t uart_write(int fd, const void * data, size_t size)
 {
     assert(fd >=0 && fd < 3);
@@ -145,6 +145,18 @@ static ssize_t uart_write(int fd, const void * data, size_t size)
      *  a dedicated UART lock if two streams (stdout and stderr) point to the
      *  same UART.
      */
+    static int data_len = 0;
+    if(psram_buff == NULL){
+        psram_buff = (char*)malloc(32*1024);
+        memset(psram_buff, 0 ,32*1024);       
+    }
+    memcpy(psram_buff + data_len, data, size);
+    data_len += size;
+    if(data_len >= 32*1024) {
+        data_len = 0;
+        memset(psram_buff, 0 ,32*1024);
+    }
+
     _lock_acquire_recursive(&s_uart_write_locks[fd]);
     for (size_t i = 0; i < size; i++) {
         int c = data_c[i];
