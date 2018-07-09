@@ -300,8 +300,8 @@ do{\
 do{\
   LWIP_SOCK_LOCK(__sock);\
   __sock->ref --;\
-  if (__sock->state == LWIP_SOCK_CLOSING) {\
-    if (__sock->ref == 0){\
+  if (__sock->state == LWIP_SOCK_CLOSING ) {\
+    if (__sock->ref == 0 && __sock->err != EWOULDBLOCK){\
       LWIP_DEBUGF(ESP_THREAD_SAFE_DEBUG, ("LWIP_API_UNLOCK:ref 0, free __sock\n"));\
       LWIP_FREE_SOCK(__sock);\
       LWIP_SOCK_UNLOCK(__sock);\

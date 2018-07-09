@@ -930,6 +930,7 @@ lwip_netconn_do_close_internal(struct netconn *conn  WRITE_DELAYED_PARAM SIG_CLO
 #endif /* LWIP_SO_LINGER */
     {
       err = tcp_close(tpcb);
+      printf("tcp_close err %d\n",err);
     }
   } else {
     err = tcp_shutdown(tpcb, shut_rx, shut_tx);
@@ -984,6 +985,7 @@ lwip_netconn_do_close_internal(struct netconn *conn  WRITE_DELAYED_PARAM SIG_CLO
       close_finished = 1;
     }
   }
+  printf("close_finished %d close %d err %d\n",close_finished ,close ,err);
   if (close_finished) {
     /* Closing done (succeeded, non-memory error, nonblocking error or timeout) */
     sys_sem_t* op_completed_sem = LWIP_API_MSG_SEM(conn->current_msg);
