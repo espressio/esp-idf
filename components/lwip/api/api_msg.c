@@ -661,6 +661,7 @@ lwip_netconn_do_newconn(void *m)
  * @return a newly allocated struct netconn or
  *         NULL on memory error
  */
+#include "esp_heap_caps.h"
 struct netconn*
 netconn_alloc(enum netconn_type t, netconn_callback callback)
 {
@@ -674,7 +675,7 @@ netconn_alloc(enum netconn_type t, netconn_callback callback)
 
   conn->last_err = ERR_OK;
   conn->type = t;
-  printf("conn %p netconn_alloc pcb.tcp = NULL\n",conn);
+  printf("conn %p netconn_alloc pcb.tcp = NULL,heap %d\n",conn,heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
   conn->pcb.tcp = NULL;
 
   /* If all sizes are the same, every compiler should optimize this switch to nothing */
